@@ -15,5 +15,7 @@ RUN apt-get update && \
 
 RUN pip install -r requirements.txt
 
+RUN chmod +x /app/clientportal.gw/bin/run.sh
+
 # run the command to start Python
 CMD ["python", "run.py"]
