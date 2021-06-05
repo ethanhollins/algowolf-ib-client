@@ -115,9 +115,9 @@ class IB(object):
 
 
 	def _start_gateway(self):
-		print(f'GATEWAY: {[ "sudo", GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, self.port ]}', flush=True)
+		print(f'GATEWAY: {[ GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, self.port ]}', flush=True)
 		self._gateway_process = subprocess.Popen(
-			[ 'sudo', GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, str(self.port) ]
+			[ GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, str(self.port) ]
 		)
 
 		return { 'complete': True }

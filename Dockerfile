@@ -16,4 +16,4 @@ RUN apt-get update && \
 RUN pip install -r requirements.txt
 
 # run the command to start Python
-CMD ["sudo", "python", "run.py"]
+CMD ["python", "run.py"]
