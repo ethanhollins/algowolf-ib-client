@@ -39,6 +39,8 @@ class Subscription(object):
 class IB(object):
 
 	def __init__(self, sio, port, user_id, strategy_id, broker_id):
+		print('IB INIT', flush=True)
+
 		self.sio = sio
 		self.port = port
 
@@ -113,9 +115,9 @@ class IB(object):
 
 
 	def _start_gateway(self):
-		print(f'GATEWAY: {[ GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, self.port ]}', flush=True)
+		print(f'GATEWAY: {[ 'sudo', GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, self.port ]}', flush=True)
 		self._gateway_process = subprocess.Popen(
-			[ GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, str(self.port) ]
+			[ 'sudo', GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, str(self.port) ]
 		)
 
 		return { 'complete': True }
