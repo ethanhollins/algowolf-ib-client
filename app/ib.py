@@ -111,7 +111,7 @@ class IB(object):
 				except Exception:
 					print(traceback.format_exc(), flush=True)
 
-				time.sleep(30)
+				time.sleep(60)
 
 
 
