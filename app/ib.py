@@ -65,6 +65,7 @@ class IB(object):
 
 	def _periodic_check(self):
 		while True:
+			print(f'[_periodic_check] {time.time()}', flush=True)
 			if not self._logged_in:
 				try:
 					ept = '/sso/validate'
@@ -318,6 +319,7 @@ class IB(object):
 		ept = f'/portfolio/{account_id}/summary'
 		print(f'[getAccountInfo] {ept}', flush=True)
 		res = self._session.get(self._url + ept)
+		print(f'[getAccountInfo] {res.status_code} {res.text}', flush=True)
 		
 		if res.status_code == 200:
 			data = res.json()
