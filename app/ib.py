@@ -101,7 +101,7 @@ class IB(object):
 						data = res.json()
 						print(f'{json.dumps(data, indent=2)}', flush=True)
 						if not data["iserver"]["authStatus"]["authenticated"]:
-							self.authIServer()
+							self.authIServer(timeout=0)
 
 					if self._iserver_auth:
 						ept = '/iserver/account/orders'
@@ -111,7 +111,7 @@ class IB(object):
 				except Exception:
 					print(traceback.format_exc(), flush=True)
 
-				time.sleep(60)
+				time.sleep(30)
 
 
 
@@ -269,7 +269,7 @@ class IB(object):
 		return
 
 
-	def authIServer(self):
+	def authIServer(self, timeout=30):
 		print('Authenticating IServer', flush=True)
 
 		ept = '/iserver/reauthenticate?force=True'
@@ -277,7 +277,7 @@ class IB(object):
 
 		ept = '/iserver/auth/status'
 		start_time = time.time()
-		while time.time() - start_time < 30:
+		while time.time() - start_time < timeout:
 			res = self._session.get(self._url + ept)
 			if res.status_code == 200:
 				data = res.json()
