@@ -101,7 +101,10 @@ class IB(object):
 						data = res.json()
 						print(f'{json.dumps(data, indent=2)}', flush=True)
 						if not data["iserver"]["authStatus"]["authenticated"]:
+							self._iserver_auth = False
 							self.authIServer(timeout=0)
+						else:
+							self._iserver_auth = True
 
 					if self._iserver_auth:
 						ept = '/iserver/account/orders'
