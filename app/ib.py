@@ -86,7 +86,7 @@ class IB(object):
 									sub.onUpdate('logged_in')
 
 				except Exception:
-					pass
+					print(traceback.format_exc(), flush=True)
 
 				time.sleep(1)
 			else:
@@ -108,7 +108,7 @@ class IB(object):
 						print(f'[iserver] {res.status_code}, {res.text}', flush=True)
 
 				except Exception:
-					pass
+					print(traceback.format_exc(), flush=True)
 
 				time.sleep(30)
 
