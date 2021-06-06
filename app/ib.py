@@ -59,14 +59,14 @@ class IB(object):
 		self._iserver_auth = False
 		self._selected_account = None
 
-		if self.port != 5000:
+		if self.port != '5000':
 			Thread(target=self._periodic_check).start()
 
 
 	def _periodic_check(self):
 		try:
 			while True:
-				print(f'[_periodic_check] {time.time()}', flush=True)
+				print(f'[_periodic_check] ({self.port}) {time.time()}', flush=True)
 				if not self._logged_in:
 					try:
 						ept = '/sso/validate'
@@ -119,7 +119,7 @@ class IB(object):
 					time.sleep(30)
 
 		except Exception:
-			print(f'[_periodic_check] {traceback.format_exc()}', flush=True)
+			print(f'[_periodic_check] ({self.port}) {traceback.format_exc()}', flush=True)
 
 
 
