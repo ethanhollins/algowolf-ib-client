@@ -64,58 +64,62 @@ class IB(object):
 
 
 	def _periodic_check(self):
-		while True:
-			print(f'[_periodic_check] {time.time()}', flush=True)
-			if not self._logged_in:
-				try:
-					ept = '/sso/validate'
-					res = self._session.get(self._url + ept, timeout=2)
-					if res.status_code < 500:
-						if not self._is_gateway_loaded:
-							print(f'[CHECK] ({self.port}) Gateway loaded. To Login: http://127.0.0.1:{self.port}/', flush=True)
-							self._is_gateway_loaded = True
-							# Send gateway loaded message
-							for sub in self._gui_subscriptions:
-								sub.onUpdate('gateway_loaded')
+		try:
+			while True:
+				print(f'[_periodic_check] {time.time()}', flush=True)
+				if not self._logged_in:
+					try:
+						ept = '/sso/validate'
+						res = self._session.get(self._url + ept, timeout=2)
+						if res.status_code < 500:
+							if not self._is_gateway_loaded:
+								print(f'[CHECK] ({self.port}) Gateway loaded. To Login: http://127.0.0.1:{self.port}/', flush=True)
+								self._is_gateway_loaded = True
+								# Send gateway loaded message
+								for sub in self._gui_subscriptions:
+									sub.onUpdate('gateway_loaded')
+
+							if res.status_code == 200:
+								if not self._logged_in:
+									print(f'[CHECK] ({self.port}) Logged in.', flush=True)
+									self._logged_in = True
+									# Send logged in message
+									for sub in self._gui_subscriptions:
+										sub.onUpdate('logged_in')
+
+					except Exception:
+						print(traceback.format_exc(), flush=True)
+
+					time.sleep(1)
+				else:
+					try:
+						print(f'[Tickle] {time.time()}', flush=True)
+						ept = '/tickle'
+						res = self._session.post(self._url + ept)
+
+						print(f'[Tickle] {res.status_code}', flush=True)
 
 						if res.status_code == 200:
-							if not self._logged_in:
-								print(f'[CHECK] ({self.port}) Logged in.', flush=True)
-								self._logged_in = True
-								# Send logged in message
-								for sub in self._gui_subscriptions:
-									sub.onUpdate('logged_in')
+							data = res.json()
+							print(f'{json.dumps(data, indent=2)}', flush=True)
+							if not data["iserver"]["authStatus"]["authenticated"]:
+								self._iserver_auth = False
+								self.authIServer(timeout=0)
+							else:
+								self._iserver_auth = True
 
-				except Exception:
-					print(traceback.format_exc(), flush=True)
+						if self._iserver_auth:
+							ept = '/iserver/account/orders'
+							res = self._session.get(self._url + ept)
+							print(f'[iserver] {res.status_code}, {res.text}', flush=True)
 
-				time.sleep(1)
-			else:
-				try:
-					print(f'[Tickle] {time.time()}', flush=True)
-					ept = '/tickle'
-					res = self._session.post(self._url + ept)
+					except Exception:
+						print(traceback.format_exc(), flush=True)
 
-					print(f'[Tickle] {res.status_code}', flush=True)
+					time.sleep(30)
 
-					if res.status_code == 200:
-						data = res.json()
-						print(f'{json.dumps(data, indent=2)}', flush=True)
-						if not data["iserver"]["authStatus"]["authenticated"]:
-							self._iserver_auth = False
-							self.authIServer(timeout=0)
-						else:
-							self._iserver_auth = True
-
-					if self._iserver_auth:
-						ept = '/iserver/account/orders'
-						res = self._session.get(self._url + ept)
-						print(f'[iserver] {res.status_code}, {res.text}', flush=True)
-
-				except Exception:
-					print(traceback.format_exc(), flush=True)
-
-				time.sleep(30)
+		except Exception:
+			print(f'[_periodic_check] {traceback.format_exc()}', flush=True)
 
 
 
