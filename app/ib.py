@@ -91,6 +91,7 @@ class IB(object):
 				time.sleep(1)
 			else:
 				try:
+					print(f'[Tickle] {time.time()}', flush=True)
 					ept = '/tickle'
 					res = self._session.post(self._url + ept)
 
