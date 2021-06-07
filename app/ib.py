@@ -118,7 +118,7 @@ class IB(object):
 					except Exception:
 						print(traceback.format_exc(), flush=True)
 
-					time.sleep(30)
+					time.sleep(10)
 
 		except Exception:
 			print(f'[_periodic_check] ({self.port}) {traceback.format_exc()}', flush=True)
