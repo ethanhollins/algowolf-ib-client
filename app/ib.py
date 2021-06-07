@@ -96,19 +96,22 @@ class IB(object):
 				else:
 					try:
 						print(f'[Tickle] {time.time()}', flush=True)
-						ept = '/tickle'
-						res = self._session.post(self._url + ept, timeout=5)
+						ept = '/sso/validate'
+						res = self._session.get(self._url + ept, timeout=2)
 
 						print(f'[Tickle] {res.status_code}', flush=True)
 
 						if res.status_code == 200:
-							data = res.json()
-							print(f'{json.dumps(data, indent=2)}', flush=True)
-							if not data["iserver"]["authStatus"]["authenticated"]:
-								self._iserver_auth = False
-								self.authIServer(timeout=0)
-							else:
-								self._iserver_auth = True
+							ept = '/iserver/auth/status'
+							res = self._session.post(self._url + ept, timeout=2)
+							if res.status_code == 200:
+								data = res.json()
+								print(f'{json.dumps(data, indent=2)}', flush=True)
+								if not data.get('authenticated'):
+									self._iserver_auth = False
+									self.authIServer(timeout=0)
+								else:
+									self._iserver_auth = True
 
 						if self._iserver_auth:
 							ept = '/iserver/account/orders'
