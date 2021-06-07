@@ -60,7 +60,9 @@ class IB(object):
 		self._selected_account = None
 
 		if self.port != '5000':
-			Thread(target=self._periodic_check).start()
+			t = Thread(target=self._periodic_check)
+			print(f'Is Daemon: {t.isDaemon()}', flush=True)
+			t.start()
 
 
 	def _periodic_check(self):
@@ -95,7 +97,7 @@ class IB(object):
 					try:
 						print(f'[Tickle] {time.time()}', flush=True)
 						ept = '/tickle'
-						res = self._session.post(self._url + ept)
+						res = self._session.post(self._url + ept, timeout=5)
 
 						print(f'[Tickle] {res.status_code}', flush=True)
 
@@ -110,7 +112,7 @@ class IB(object):
 
 						if self._iserver_auth:
 							ept = '/iserver/account/orders'
-							res = self._session.get(self._url + ept)
+							res = self._session.get(self._url + ept, timeout=5)
 							print(f'[iserver] {res.status_code}, {res.text}', flush=True)
 
 					except Exception:
@@ -281,7 +283,7 @@ class IB(object):
 		print('Authenticating IServer', flush=True)
 
 		ept = '/iserver/reauthenticate?force=True'
-		res = self._session.get(self._url + ept)
+		res = self._session.get(self._url + ept, timeout=5)
 
 		ept = '/iserver/auth/status'
 		start_time = time.time()
