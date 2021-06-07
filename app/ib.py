@@ -75,7 +75,7 @@ class IB(object):
 						res = self._session.get(self._url + ept, timeout=2)
 						if res.status_code < 500:
 							if not self._is_gateway_loaded:
-								print(f'[CHECK] ({self.port}) Gateway loaded. To Login: http://127.0.0.1:{self.port}/', flush=True)
+								print(f'[CHECK] ({self.port}) Gateway loaded. To Login: https://ib.algowolf.com:{self.port}/', flush=True)
 								self._is_gateway_loaded = True
 								# Send gateway loaded message
 								for sub in self._gui_subscriptions:
@@ -97,13 +97,15 @@ class IB(object):
 					try:
 						print(f'[Tickle] {time.time()}', flush=True)
 						ept = '/sso/validate'
-						res = self._session.get(self._url + ept, timeout=2)
-
+						res = self._session.get(self._url + ept, timeout=5)
+						print(f'[Validate] {res.status_code}', flush=True)
+						ept = '/tickle'
+						res = self._session.post(self._url + ept, timeout=5)
 						print(f'[Tickle] {res.status_code}', flush=True)
 
 						if res.status_code == 200:
 							ept = '/iserver/auth/status'
-							res = self._session.post(self._url + ept, timeout=2)
+							res = self._session.post(self._url + ept, timeout=5)
 							if res.status_code == 200:
 								data = res.json()
 								print(f'{json.dumps(data, indent=2)}', flush=True)
