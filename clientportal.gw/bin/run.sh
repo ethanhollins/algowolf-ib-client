@@ -13,7 +13,7 @@ config_file=$1
 config_path=$(dirname $1)
 name=$(basename $config_path)
 
-export RUNTIME_PATH="$config_path:dist/ibgroup.web.core.iblink.router.clientportal.gw.jar:build/lib/runtime/*"
+export RUNTIME_PATH="$config_path:/app/clientportal.gw/dist/ibgroup.web.core.iblink.router.clientportal.gw.jar:/app/clientportal.gw/build/lib/runtime/*"
 
 echo "running $verticle "
 echo " runtime path : $RUNTIME_PATH"
