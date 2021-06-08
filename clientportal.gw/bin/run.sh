@@ -13,6 +13,7 @@ config_file=$1
 config_path=$(dirname $1)
 name=$(basename $config_path)
 
+# export RUNTIME_PATH="$config_path:dist/ibgroup.web.core.iblink.router.clientportal.gw.jar:build/lib/runtime/*"
 export RUNTIME_PATH="$config_path:/app/clientportal.gw/dist/ibgroup.web.core.iblink.router.clientportal.gw.jar:/app/clientportal.gw/build/lib/runtime/*"
 
 echo "running $verticle "
@@ -29,5 +30,4 @@ java \
 -Dnolog4j2.debug=true \
 -cp "${RUNTIME_PATH}" \
 ibgroup.web.core.clientportal.gw.GatewayStart \
---conf ../$config_file \
 -port $2
