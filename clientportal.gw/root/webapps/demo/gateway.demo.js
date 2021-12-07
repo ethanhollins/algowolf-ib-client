@@ -29853,9 +29853,9 @@ exports.default = {
         return {
             accounts: [],
             positions: [],
-            priceFields: [77, 78, 79, 80, 82, 83, 7682, 7629],
-            delayedFields: [31, 84, 85, 86, 87, 88, 7059, 7634],
-            numericFields: [7087, 7088, 76],
+            priceFields: ["77", "78", "79", "80", "82", "83", "7682", "7629"],
+            delayedFields: ["31", "84", "85", "86", "87", "88", "7059", "7634"],
+            numericFields: ["7087", "7088", "76"],
             cols: ['INSTRUMENT', 'POSITION', 'AVG PRICE', 'MARKET VALUE', 'ASK/BID', 'LAST']
         };
     },
@@ -29981,7 +29981,7 @@ var cancelUpdates = function cancelUpdates(conid, id, onConfirm) {
         console.error('real-time api missing');
         return;
     }
-    window.ibrt.cancelId('md+' + conid, id, onConfirm);
+    window.ibrt.cancelId('umd+' + conid, id, onConfirm);
 };
 
 var cancelAllUpdates = function cancelAllUpdates(conid, onConfirm) {
@@ -29992,7 +29992,7 @@ var cancelAllUpdates = function cancelAllUpdates(conid, onConfirm) {
         console.error('real-time api missing');
         return;
     }
-    window.ibrt.cancelAll('md+' + conid, onConfirm);
+    window.ibrt.cancelAll('umd+' + conid, onConfirm);
 };
 
 var subscribeUpdates = function subscribeUpdates(_ref2, _ref3) {
@@ -30014,10 +30014,10 @@ var subscribeUpdates = function subscribeUpdates(_ref2, _ref3) {
     var args = { fields: fields, tempo: tempo, snapshot: snapshot };
     if (expire) {
         setTimeout(function () {
-            return window.ibrt.cancel('md+' + conid);
+            return window.ibrt.cancel('umd+' + conid);
         }, expire);
     }
-    return window.ibrt.subscribeArgs('md+' + conid, args, { onMessage: onUpdates });
+    return window.ibrt.subscribeArgs('smd+' + conid, args, { onMessage: onUpdates });
 };
 
 exports.default = {
@@ -30113,7 +30113,7 @@ var Realtime = function () {
         this.subscriptions = [];
         this.log = true;
         if (true) {
-            this.wsUrl = "wss://localhost:5000/v1/portal/ws";
+            this.wsUrl = "wss://localhost:5000/v1/api/ws";
         } else {
             console.error('websocket base url missing');
         }
@@ -30171,11 +30171,13 @@ var Realtime = function () {
         key: 'onOpen',
         value: function onOpen(e) {
             var _this = this;
-
-            this.subscriptions.forEach(function (s) {
-                var args = s.args ? '+' + JSON.stringify(s.args) : '';
-                _this.send('s+' + s.topic + args);
-            });
+            //Give time for authentication after ws opens
+            setTimeout(function () {
+                _this.subscriptions.forEach(function (s) {
+                    var args = s.args ? '+' + JSON.stringify(s.args) : '';
+                    _this.send(s.topic + args);
+                });
+            }, 1000);
             this.connected = true;
             this.listener && this.listener({ event: 'open', payload: e });
         }
@@ -30255,7 +30257,7 @@ var Realtime = function () {
                     handlers: [handler]
                 });
                 if (this.ws.readyState == this.ws.OPEN) {
-                    this.send('s+' + topic + '+' + JSON.stringify(args));
+                    this.send(topic + '+' + JSON.stringify(args));
                 }
             }
         }
@@ -30265,7 +30267,7 @@ var Realtime = function () {
             debug && console.debug('cancel ', topic, 'handler', handlerId);
             if (handlerId) {
                 var sub = this.subscriptions.find(function (s) {
-                    return s.topic == 'u+' + topic;
+                    return s.topic == topic;
                 });
                 if (sub) {
                     var idx = sub.handler.findIndex(function (h) {
@@ -30285,7 +30287,7 @@ var Realtime = function () {
             this.subscriptions = this.subscriptions.filter(function (s) {
                 return s.topic != topic;
             });
-            this.send('u+' + topic);
+            this.send(topic);
 
             if (true) {
                 // important to know if there are any lingering subscriptions
@@ -30317,7 +30319,7 @@ var Realtime = function () {
                 return s.topic == topic;
             });
             if (subscription) {
-                this.send('s+' + topic + '+' + JSON.stringify(payload));
+                this.send(topic + '+' + JSON.stringify(payload));
             } else {
                 return this.subscribeArgs(topic, payload, args);
             }

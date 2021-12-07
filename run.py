@@ -1,9 +1,11 @@
 import sys
-import socketio
 import os
 import json
 import time
+import zmq
 import traceback
+import shortuuid
+from threading import Thread
 from app.ib import IB
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,10 +15,13 @@ Utilities
 '''
 class UserContainer(object):
 
-	def __init__(self, sio):
-		self.sio = sio
+	def __init__(self):
 		self.parent = None
 		self.users = {}
+		self.add_user_queue = []
+		self.send_queue = []
+		self.zmq_context = zmq.Context()
+		self.next_port = 5000
 
 	def setParent(self, parent):
 		self.parent = parent
@@ -26,42 +31,52 @@ class UserContainer(object):
 		return self.parent
 
 
-	def addUser(self, port, user_id, strategy_id, broker_id, is_parent):
-		if port not in self.users:
-			self.users[port] = IB(self.sio, port, user_id, strategy_id, broker_id)
+	def addUser(self, port, user_id, strategy_id, broker_id, username, password, is_parent):
+		if broker_id not in self.users:
+			self.users[broker_id] = IB(port, user_id, strategy_id, broker_id, username, password)
 			if is_parent:
-				self.parent = self.users[port]
+				self.parent = self.users[broker_id]
 
-		return self.users[port]
-
-
-	def deleteUser(self, port):
-		if port in self.users:
-			self.users[port].stop()
-			del self.users[port]
+		return self.users[broker_id]
 
 
-	def getUser(self, port):
-		return self.users.get(port)
+	def deleteUser(self, broker_id):
+		if broker_id in self.users:
+			self.users[broker_id].stop()
+			del self.users[broker_id]
+
+
+	def getUser(self, broker_id):
+		return self.users.get(broker_id)
 
 
 	def replaceUser(self, port, user_id, strategy_id, broker_id):
-		user = self.getUser(port)
+		user = self.getUser(broker_id)
 		if user is not None:
 			user.replace(user_id, strategy_id, broker_id)
 
 	def findUser(self, user_id, strategy_id, broker_id):
-		for port in self.users:
-			user = self.users[port]
+		for broker_id in self.users:
+			user = self.users[broker_id]
 			if (
 				user.userId == user_id and
 				user.strategyId == strategy_id and
 				user.brokerId == broker_id and
 				user._logged_in
 			):
-				return port
+				return broker_id
 
 		return -1
+
+	def addToUserQueue(self):
+		_id = shortuuid.uuid()
+		self.add_user_queue.append(_id)
+		while self.add_user_queue[0] != _id:
+			time.sleep(0.1)
+
+
+	def popUserQueue(self):
+		del self.add_user_queue[0]
 
 
 def getConfig():
@@ -78,8 +93,7 @@ Initialize
 '''
 
 config = getConfig()
-sio = socketio.Client(reconnection=False)
-user_container = UserContainer(sio)
+user_container = UserContainer()
 
 '''
 Socket IO functions
@@ -87,19 +101,30 @@ Socket IO functions
 
 def sendResponse(msg_id, res):
 	res = {
-		'msg_id': msg_id,
-		'result': res
+		"type": "broker_reply",
+		"message": {
+			'msg_id': msg_id,
+			'result': res
+		}
 	}
 
-	sio.emit(
-		'broker_res', 
-		res, 
-		namespace='/broker'
-	)
+	user_container.send_queue.append(res)
 
 
-def onAddUser(port, user_id, strategy_id, broker_id, is_parent):
-	user = user_container.addUser(str(port), user_id, strategy_id, broker_id, is_parent)
+def onAddUser(user_id, strategy_id, broker_id, username, password, is_parent):
+	user_container.addToUserQueue()
+	try:
+		if broker_id not in user_container.users:
+			user = user_container.addUser(str(user_container.next_port), user_id, strategy_id, broker_id, username, password, is_parent)
+			user_container.next_port += 1
+		else:
+			user = user_container.getUser(broker_id)
+	
+	except Exception:
+		print(traceback.format_exc())
+	finally:
+		user_container.popUserQueue()
+
 	return {
 		'_gateway_loaded': user._is_gateway_loaded
 	}
@@ -181,61 +206,18 @@ def _subscribe_chart_updates(user, msg_id, instrument):
 	}
 
 
-# Create Position EPT
-
-# Modify Position EPT
-
-# Delete Position EPT
-
-# Create Order EPT
-
-# Modify Order EPT
-
-# Delete Order EPT
-
-# Get Account Details EPT
-
-# Get All Accounts EPT
-
-def reconnect():
-	while True:
-		try:
-			sio.connect(
-				config['STREAM_URL'], 
-				headers={
-					'Broker': 'ib'
-				}, 
-				namespaces=['/broker']
-			)
-			break
-		except Exception:
-			pass
-	print('RECONNECTED!', flush=True)
-
-
-@sio.on('connect', namespace='/broker')
-def onConnect():
-	print('CONNECTED!', flush=True)
-
-
-@sio.on('disconnect', namespace='/broker')
-def onDisconnect():
-	print('DISCONNECTED', flush=True)
-	reconnect()
-
-
-@sio.on('broker_cmd', namespace='/broker')
 def onCommand(data):
 	print(f'COMMAND: {data}', flush=True)
 
 	try:
 		cmd = data.get('cmd')
 		broker = data.get('broker')
-		port = None
-		if len(data.get('args')):
-			port = str(data.get('args')[0])
+		broker_id = data.get('broker_id')
 
-		user = getUser(port)
+		if broker_id is None:
+			user = getParent()
+		else:
+			user = getUser(broker_id)
 
 		if broker == 'ib':
 			res = {}
@@ -311,24 +293,41 @@ def onCommand(data):
 		})
 
 
-def createApp():
-	print('CREATING APP')
+def send_loop():
+	user_container.zmq_req_socket = user_container.zmq_context.socket(zmq.DEALER)
+	user_container.zmq_req_socket.connect("tcp://zmq_broker:5557")
+
 	while True:
 		try:
-			sio.connect(
-				config['STREAM_URL'], 
-				headers={
-					'Broker': 'ib'
-				}, 
-				namespaces=['/broker']
-			)
-			break
-		except Exception:
-			pass
+			if len(user_container.send_queue):
+				item = user_container.send_queue[0]
+				del user_container.send_queue[0]
 
-	return sio
+				user_container.zmq_req_socket.send_json(item, zmq.NOBLOCK)
+
+		except Exception:
+			print(traceback.format_exc())
+
+		time.sleep(0.001)
+
+
+def run():
+	user_container.zmq_pull_socket = user_container.zmq_context.socket(zmq.PULL)
+	user_container.zmq_pull_socket.connect("tcp://zmq_broker:5564")
+
+	user_container.zmq_poller = zmq.Poller()
+	user_container.zmq_poller.register(user_container.zmq_pull_socket, zmq.POLLIN)
+
+	while True:
+		socks = dict(user_container.zmq_poller.poll())
+
+		if user_container.zmq_pull_socket in socks:
+			message = user_container.zmq_pull_socket.recv_json()
+			print(f"[ZMQ_PULL] {message}")
+			onCommand(message)
 
 
 if __name__ == '__main__':
-	sio = createApp()
-	print('DONE')
+	print("START IB", flush=True)
+	Thread(target=send_loop).start()
+	run()

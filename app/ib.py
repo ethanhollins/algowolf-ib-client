@@ -8,6 +8,10 @@ import subprocess
 import requests
 import json
 import traceback
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from . import tradelib as tl
 from threading import Thread
 from datetime import datetime
@@ -15,6 +19,9 @@ from datetime import datetime
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GATEWAY_RUN_DIR = os.path.join(ROOT_DIR, 'clientportal.gw/bin/run.sh')
 GATEWAY_CONFIG_DIR = os.path.join(ROOT_DIR, 'clientportal.gw/root/conf.yaml')
+CHROME_DRIVER_DIR = os.path.join(ROOT_DIR, 'chromedriver_linux64/chromedriver')
+FIREFOX_BINARY_DIR = os.path.join(ROOT_DIR, '/usr/bin/firefox/firefox')
+FIREFOX_DRIVER_DIR = os.path.join(ROOT_DIR, 'geckodriver-v0.30.0-linux64/geckodriver')
 
 
 class Subscription(object):
@@ -27,28 +34,32 @@ class Subscription(object):
 	def onUpdate(self, *args):
 		print(f'ON UPDATE: {args}', flush=True)
 
-		self.broker._send_response(
-			self.msg_id,
-			{
-				'args': list(args),
-				'kwargs': {}
+		self.broker.container.send_queue.append({
+			"type": "account",
+			"message": {
+				"msg_id": self.msg_id,
+				"result": {
+					"args": args,
+					"kwargs": {}
+				}
 			}
-		)
+		})
 
 
 class IB(object):
 
-	def __init__(self, sio, port, user_id, strategy_id, broker_id):
-		print('IB INIT', flush=True)
+	def __init__(self, port, user_id, strategy_id, broker_id, username, password):
+		print(f'IB INIT: {port}, {user_id}, {username}, {password}', flush=True)
 
-		self.sio = sio
 		self.port = port
 
 		self.userId = user_id
 		self.strategyId = strategy_id
 		self.brokerId = broker_id
+		self.username = username
+		self.password = password
 
-		self._url = f'http://ib_client:{self.port}/v1/api'
+		self._url = f'https://localhost:{self.port}/v1/api'
 		self._session = requests.session()
 		self.accounts = []
 
@@ -59,75 +70,155 @@ class IB(object):
 		self._iserver_auth = False
 		self._selected_account = None
 
-		if self.port != '5000':
-			t = Thread(target=self._periodic_check)
-			print(f'Is Daemon: {t.isDaemon()}', flush=True)
-			t.start()
+		self._start_gateway()
+		self._create_webdriver()
+		self.standardReconnect()
+
+		# if self.port != '5000':
+		t = Thread(target=self._periodic_check)
+		t.start()
 
 
 	def _periodic_check(self):
-		try:
-			while True:
-				print(f'[_periodic_check] ({self.port}) {time.time()}', flush=True)
-				if not self._logged_in:
-					try:
-						ept = '/sso/validate'
-						res = self._session.get(self._url + ept, timeout=2)
-						if res.status_code < 500:
-							if not self._is_gateway_loaded:
-								print(f'[CHECK] ({self.port}) Gateway loaded. To Login: https://ib.algowolf.com:{self.port}/', flush=True)
-								self._is_gateway_loaded = True
-								# Send gateway loaded message
-								for sub in self._gui_subscriptions:
-									sub.onUpdate('gateway_loaded')
+		c_time = time.time()
+		relogin_time = time.time()
+		reauth_time = time.time()
+		while True:
+			if time.time() - c_time >= 10:
+				c_time = time.time()
+				if time.time() - relogin_time >= 60*60:
+					relogin_time = time.time()
+					print("[_periodic_check] RELOGGING IN...", flush=True)
+					self.standardReconnect()
 
-							if res.status_code == 200:
-								if not self._logged_in:
-									print(f'[CHECK] ({self.port}) Logged in.', flush=True)
-									self._logged_in = True
-									# Send logged in message
-									for sub in self._gui_subscriptions:
-										sub.onUpdate('logged_in')
+				res = requests.get(self._url + "/sso/validate", verify=False)
+				if res.status_code == 200:
+					data = res.json()
+					print(f"[_periodic_check] {time.time()} ({res.status_code}) {data}\n", flush=True)
+
+				res = requests.post(self._url + "/tickle", verify=False)
+				if res.status_code == 200:
+					data = res.json()
+					print(f"[_periodic_check] {time.time()} ({res.status_code}) {data}\n", flush=True)
+					try:
+						if (time.time() - reauth_time >= 60*20 or 
+							not data["iserver"]["authStatus"]["authenticated"] or 
+							data["iserver"]["authStatus"]["competing"]):
+
+							reauth_time = time.time()
+							if data["iserver"]["authStatus"]["competing"]:
+								self.restartReconnect()
+							else:
+								self.standardReconnect()
 
 					except Exception:
-						print(traceback.format_exc(), flush=True)
-
-					time.sleep(1)
+						print(f"[_periodic_check] {traceback.format_exc()}\n", flush=True)
+						
+				elif res.status_code == 401:
+					c_time = time.time() - 31
+					print(f"[_periodic_check] {time.time()} ({res.status_code}) Unauthorized\n", flush=True)
+					self.standardReconnect()
 				else:
-					try:
-						print(f'[Tickle] {time.time()}', flush=True)
-						ept = '/sso/validate'
-						res = self._session.get(self._url + ept, timeout=5)
-						print(f'[Validate] {res.status_code}', flush=True)
-						ept = '/tickle'
-						res = self._session.post(self._url + ept, timeout=5)
-						print(f'[Tickle] {res.status_code}', flush=True)
+					c_time = time.time() - 31
+					print(f"[_periodic_check] {time.time()} ({res.status_code}) Failed\n", flush=True)
 
-						if res.status_code == 200:
-							ept = '/iserver/auth/status'
-							res = self._session.post(self._url + ept, timeout=5)
-							if res.status_code == 200:
-								data = res.json()
-								print(f'{json.dumps(data, indent=2)}', flush=True)
-								if not data.get('authenticated'):
-									self._iserver_auth = False
-									self.authIServer(timeout=0)
-								else:
-									self._iserver_auth = True
 
-						if self._iserver_auth:
-							ept = '/iserver/account/orders'
-							res = self._session.get(self._url + ept, timeout=5)
-							print(f'[iserver] {res.status_code}, {res.text}', flush=True)
+	def standardReconnect(self):
+		print(f"[standardReconnect] {time.time()}", flush=True)
+		self.login()
+		# res = requests.post(self._url + "/iserver/reauthenticate", verify=False)
+		res = requests.get(self._url + "/sso/validate", verify=False)
+		print(f"[standardReconnect] ({res.status_code}) Validate. {res.json()}\n", flush=True)
+		requests.post(self._url + "/iserver/reauthenticate", verify=False)
+		if res.status_code == 200:
+			checks = 0
+			time.sleep(1)
+			res = requests.post(self._url + "/iserver/auth/status", verify=False)
+			while not res.json()["authenticated"]:
+				print(f"[standardReconnect] ({res.status_code}) Reauthenticated. {res.json()}\n", flush=True)
 
-					except Exception:
-						print(traceback.format_exc(), flush=True)
+				if checks >= 5:
+					print(f"[standardReconnect] Not Authenticated!.\n", flush=True)
+					return
 
-					time.sleep(10)
+				checks += 1
+				time.sleep(1)
+				res = requests.post(self._url + "/iserver/auth/status", verify=False)
+			
+			print(f"[standardReconnect] Authenticated!.\n", flush=True)
 
-		except Exception:
-			print(f'[_periodic_check] ({self.port}) {traceback.format_exc()}', flush=True)
 
+	def restartReconnect(self):
+		print(f"[restartReconnect] {time.time()}", flush=True)
+		res = requests.post(self._url + "/logout", verify=False)
+		self._stop_gateway()
+		self._start_gateway()
+		self.standardReconnect()
+
+
+
+	# def _periodic_check(self):
+	# 	try:
+	# 		while True:
+	# 			print(f'[_periodic_check] ({self.port}) {time.time()}', flush=True)
+	# 			if not self._logged_in:
+	# 				try:
+	# 					ept = '/sso/validate'
+	# 					res = self._session.get(self._url + ept, timeout=2)
+	# 					if res.status_code < 500:
+	# 						if not self._is_gateway_loaded:
+	# 							print(f'[CHECK] ({self.port}) Gateway loaded. To Login: https://ib.algowolf.com:{self.port}/', flush=True)
+	# 							self._is_gateway_loaded = True
+	# 							# Send gateway loaded message
+	# 							for sub in self._gui_subscriptions:
+	# 								sub.onUpdate('gateway_loaded')
+
+	# 						if res.status_code == 200:
+	# 							if not self._logged_in:
+	# 								print(f'[CHECK] ({self.port}) Logged in.', flush=True)
+	# 								self._logged_in = True
+	# 								# Send logged in message
+	# 								for sub in self._gui_subscriptions:
+	# 									sub.onUpdate('logged_in')
+
+	# 				except Exception:
+	# 					print(traceback.format_exc(), flush=True)
+
+	# 				time.sleep(1)
+	# 			else:
+	# 				try:
+	# 					print(f'[Tickle] {time.time()}', flush=True)
+	# 					ept = '/sso/validate'
+	# 					res = self._session.get(self._url + ept, timeout=5)
+	# 					print(f'[Validate] {res.status_code}', flush=True)
+	# 					ept = '/tickle'
+	# 					res = self._session.post(self._url + ept, timeout=5)
+	# 					print(f'[Tickle] {res.status_code}', flush=True)
+
+	# 					if res.status_code == 200:
+	# 						ept = '/iserver/auth/status'
+	# 						res = self._session.post(self._url + ept, timeout=5)
+	# 						if res.status_code == 200:
+	# 							data = res.json()
+	# 							print(f'{json.dumps(data, indent=2)}', flush=True)
+	# 							if not data.get('authenticated'):
+	# 								self._iserver_auth = False
+	# 								self.authIServer(timeout=0)
+	# 							else:
+	# 								self._iserver_auth = True
+
+	# 					if self._iserver_auth:
+	# 						ept = '/iserver/account/orders'
+	# 						res = self._session.get(self._url + ept, timeout=5)
+	# 						print(f'[iserver] {res.status_code}, {res.text}', flush=True)
+
+	# 				except Exception:
+	# 					print(traceback.format_exc(), flush=True)
+
+	# 				time.sleep(10)
+
+	# 	except Exception:
+	# 		print(f'[_periodic_check] ({self.port}) {traceback.format_exc()}', flush=True)
 
 
 	def _start_gateway(self):
@@ -136,7 +227,84 @@ class IB(object):
 			[ GATEWAY_RUN_DIR, GATEWAY_CONFIG_DIR, str(self.port) ]
 		)
 
+		time.sleep(2)
 		return { 'complete': True }
+
+
+	def _stop_gateway(self):
+		self._gateway_process.terminate()
+
+		try:
+			self._gateway_process.wait(timeout=5)
+		except subprocess.TimeoutExpired as e:
+			self._gateway_process.kill()
+
+
+	def _create_webdriver(self):
+		print("[_create_webdriver] Starting webdriver...", flush=True)
+		chrome_options = Options()
+
+		chrome_options.add_argument("--headless")
+		chrome_options.add_argument('--ignore-certificate-errors')
+		chrome_options.add_argument('--ignore-ssl-errors')
+		chrome_options.add_argument("--no-sandbox")
+		chrome_options.add_argument("--disable-dev-shm-usage")
+		chrome_prefs = {}
+		chrome_options.experimental_options["prefs"] = chrome_prefs
+		chrome_prefs["profile.default_content_settings"] = {"images": 2}
+		# chrome_options.add_argument("--remote-debugging-port=9222")
+
+		self.driver = webdriver.Chrome(options=chrome_options)
+		print(f"[_create_webdriver] DRIVER DONE {self.driver}", flush=True)
+
+		# profile = webdriver.FirefoxProfile()
+		# profile.accept_untrusted_certs = True
+
+		# options = Options()
+		# options.add_argument("--headless")
+
+		# binary = FirefoxBinary(FIREFOX_BINARY_DIR)
+		
+		# self.driver = webdriver.Firefox(firefox_binary=FIREFOX_BINARY_DIR, executable_path=FIREFOX_DRIVER_DIR, options=options)
+		# self.driver = webdriver.Remote(
+        #    command_executor='http://selenium_hub:6000/wd/hub',
+        #    desired_capabilities=DesiredCapabilities.CHROME, 
+		#    options=chrome_options
+		# )
+
+
+	def login(self):
+
+		print("[login] Logging in...", flush=True)
+		start_url = f"https://localhost:{self.port}"
+		self.driver.get(start_url)
+
+		inputElement = self.driver.find_element_by_id("user_name")
+		inputElement.send_keys(self.username)
+		inputElement = self.driver.find_element_by_id("password")
+		inputElement.send_keys(self.password)
+		inputElement = self.driver.find_element_by_id("submitForm")
+		inputElement.click()
+
+		checks = 0
+		while True:
+			checks += 1
+			pre_tags = self.driver.find_elements_by_css_selector('pre')
+			if len(pre_tags):
+				if pre_tags[0].get_attribute('innerHTML') == "Client login succeeds":
+					print("[login] LOGGED IN", flush=True)
+					break
+
+			error_msg = self.driver.find_elements_by_id("ERRORMSG")
+			if len(error_msg):
+				if error_msg[0].get_attribute('innerHTML') == "Invalid username password combination":
+					print(f"[login] FAILED TO LOGIN", flush=True)
+					break
+
+			if checks >= 5:
+				return self.login()
+
+			time.sleep(1)
 
 
 	def isLoggedIn(self):
